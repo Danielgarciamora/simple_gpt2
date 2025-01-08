@@ -1,8 +1,10 @@
 import torch.nn as nn
 import torch
 import math
+import tiktoken
 
 from dataclasses import dataclass
+
 
 @dataclass
 class GPTConfig:
@@ -300,7 +302,19 @@ class HF_GPT2(nn.Module):
         
         return y, loss
     
-    def generate(self,idx,max_length,temp=1):
+    def generate(self,prompt,max_length=30,num_return_sequences=2,temp=1):
+
+        #encode
+        enc=tiktoken.get_encoding('gpt2')
+        tokens=enc.encode(prompt)
+        
+        #list to tensor
+        tokens=torch.tensor(tokens,dtype=torch.long)
+        tokens=tokens.unsqueeze(0).repeat(num_return_sequences,1)
+
+        device=next(self.parameters()).device
+        idx=tokens.to(device)
+
         for _ in range (max_length):
             #return (B,L,Voc_size)
             logits,_=self(idx)
@@ -314,7 +328,16 @@ class HF_GPT2(nn.Module):
             idx_next=torch.multinomial(probs,num_samples=1)
             #append sample to the sequence and repeat
             idx=torch.cat((idx,idx_next),dim=1)    
-        return idx
+        
+        #decode
+        response=[] 
+        for i in range(num_return_sequences):
+            tokens=idx[i,:max_length].tolist()
+            decoded=enc.decode(tokens)
+            response.append(decoded)
+
+        return response
+    
 
 import tiktoken
 class DataLoader():
