@@ -337,14 +337,15 @@ class HF_GPT2(nn.Module):
             response.append(decoded)
 
         return response
-    
+    def save_statedic(self,path):
+        torch.save(self.state_dict(), path)
 
-import tiktoken
 class DataLoader():
     def __init__(self,B,T):
         self.B=B
         self.T=T
         pass
+
     def load_txt(self,fpath):
         with open(fpath,'r') as f:
             text=f.read()        
@@ -352,6 +353,7 @@ class DataLoader():
         tokens=enc.encode(text)
         self.tokens=torch.tensor(tokens)
         self.curr_pos=0
+    
     def next_batch(self):
         buf=self.tokens[self.curr_pos:self.curr_pos+self.B*self.T+1]
         x=(buf[:-1]).view(self.B,self.T)
@@ -360,6 +362,26 @@ class DataLoader():
         if self.curr_pos+(self.B*self.T+1)>len(self.tokens):
             self.curr_pos=0
         return x,y
+    
+class Trainer():
+    def __int__(self):
+        pass
+
+    def train(self,model,data_loader, lr=3e-4):
+
+        optimizer=torch.optim.AdamW(model.parameters(),lr=lr)
+        
+        for i in range(50):
+            x,y=data_loader.next_batch()
+            x=x.to('cuda')
+            y=y.to('cuda')  
+
+            optimizer.zero_grad()
+            logits,loss=model(x,y)
+            loss.backward()
+            optimizer.step()
+            print(f"step {i}, loss: {loss.item()}")
+
 
 
 
