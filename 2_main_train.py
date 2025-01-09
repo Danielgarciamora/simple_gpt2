@@ -12,6 +12,7 @@ data=dl.load_txt('../../data/tinyshakespeare/input.txt')
 #tokens=dl.next_batch()
 
 config=GPTConfig()
+config.n_layer=12
 model=HF_GPT2(config)
 
 #model.save_statedic("./checkpoint.safetensors")
@@ -27,4 +28,6 @@ torch.compile()
 
 trainer=Trainer()
 
-trainer.train(model,dl)
+trainer.train(model,dl,5000)
+
+model.save_safetensor(("../../checkpoints/dg.safetensors"))

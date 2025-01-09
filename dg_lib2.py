@@ -4,11 +4,11 @@ import math
 import tiktoken
 
 from dataclasses import dataclass
-
-
+from safetensors.torch import save_file,load_file
 @dataclass
 class GPTConfig:
-    vocab_size:int=50304 # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
+    #vocab_size:int=50304 # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
+    vocab_size:int=50257
     block_size: int = 1024
     n_layer:int=128
     n_head:int=12
@@ -199,6 +199,7 @@ class HF_GPT2(nn.Module):
         ))
         self.lm_head=nn.Linear(config.n_embd,config.vocab_size,bias=False)
         
+        #per Transformer paper
         self.transformer.wte.weight = self.lm_head.weight
         
         #PyTorch way to initialize the weights of each layer(module). 
@@ -275,7 +276,7 @@ class HF_GPT2(nn.Module):
                 with torch.no_grad():
                     sd[k].copy_(sd_hf[k])
         return model
-    
+
     def forward(self,idx,targets=None):
         #batch size and sequence length
         b,t=idx.size()
@@ -337,8 +338,23 @@ class HF_GPT2(nn.Module):
             response.append(decoded)
 
         return response
-    def save_statedic(self,path):
-        torch.save(self.state_dict(), path)
+    def save_safetensor(self,path):
+        # temporary clone before saving 
+        self.transformer.wte.weight=torch.nn.Parameter(self.transformer.wte.weight.clone())
+        save_file(self.state_dict(), path)
+        #revert back the shared memory
+        self.transformer.wte.weight = self.lm_head.weight
+
+
+    
+    def load_safetensor(self,path):
+        state_dict=load_file(path)
+        # Re-assign nn.Parameter to the transformer weights 
+        state_dict['transformer.wte.weight'] = torch.nn.Parameter(state_dict['transformer.wte.weight'])
+        missing_keys, unexpected_keys=self.load_state_dict(state_dict)
+        #shared memory
+        self.transformer.wte.weight = self.lm_head.weight
+
 
 class DataLoader():
     def __init__(self,B,T):
@@ -367,11 +383,11 @@ class Trainer():
     def __int__(self):
         pass
 
-    def train(self,model,data_loader, lr=3e-4):
+    def train(self,model,data_loader,steps=50, lr=3e-4):
 
         optimizer=torch.optim.AdamW(model.parameters(),lr=lr)
         
-        for i in range(50):
+        for i in range(steps):
             x,y=data_loader.next_batch()
             x=x.to('cuda')
             y=y.to('cuda')  
