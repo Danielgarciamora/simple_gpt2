@@ -5,7 +5,7 @@ import tiktoken
 from dg_lib2 import HF_GPT2, GPTConfig
 from dg_lib2 import DataLoader, Trainer
 
-B,T=4,32
+B,T=4,1024
 
 dl=DataLoader(B,T)
 data=dl.load_txt('../../data/tinyshakespeare/input.txt')
@@ -28,6 +28,6 @@ torch.compile()
 
 trainer=Trainer()
 
-trainer.train(model,dl,5000)
+trainer.train(model,dl,50)
 
 model.save_safetensor(("../../checkpoints/dg.safetensors"))
