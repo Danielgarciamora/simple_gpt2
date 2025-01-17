@@ -6,18 +6,8 @@ from dg_lib2 import HF_GPT2, GPTConfig
 from dg_lib2 import DataLoader, Trainer,Trainer_base
 
 #params 
-B,T=8,1024 #minibatch and legth 
-batch_size=2**19 #batch size
+B,T=4,32 #minibatch and legth 
 
-B,T=2,32 #minibatch and legth 
-batch_size=4*32 #batch size
-
-
-#scheduler
-lr_max=3e-4 
-lr_min=lr_max*0.1
-warmup_iters=10
-lr_decay_iters=20
 
 #iters
 steps=50
@@ -38,12 +28,7 @@ model=HF_GPT2(config)
 model.to('cuda')
 
 #trainer
-trainer=Trainer()
-trainer.batch_size=batch_size
-trainer.lr_scheduler.max_lr=lr_max
-trainer.lr_scheduler.min_lr=lr_min
-trainer.lr_scheduler.warmup_iters=warmup_iters
-trainer.lr_scheduler.lr_decay_iters=lr_decay_iters
+trainer=Trainer_base()
 
 torch.compile()
 
@@ -52,19 +37,6 @@ trainer.train(model,dl,steps)
 
 #save
 model.save_safetensor(("../../checkpoints/dg.safetensors"))
-
-
-
-##
-
-#trainer=Trainer_base()
-
-#torch.compile()
-
-#train
-#trainer.train(model,dl,steps)
-
-
 
 #model.save_statedic("./checkpoint.safetensors")
 

@@ -101,7 +101,6 @@ class CausalSelfAttn(nn.Module):
         if flash & hasattr(torch.nn.functional, 'scaled_dot_product_attention'):
             self.flash=True
         else:
-            
             self.flash=False
             print("WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0")
             # causal mask to ensure that attention is only applied to the left in the input sequence
@@ -384,6 +383,37 @@ class DataLoader():
             self.curr_pos=0
         return x,y
     
+
+class Trainer_base():
+#Basic training for reference
+    def __init__(self):
+        pass
+
+    def train(self,model,data_loader,steps=50, lr=3e-4):
+
+        optimizer=torch.optim.AdamW(model.parameters(),lr=lr,betas=(0.9,0.95),eps=1e-8)
+        t0=time.time()
+
+        for it in range(steps):
+            optimizer.zero_grad()
+            
+            x,y=data_loader.next_batch()
+            x=x.to('cuda')
+            y=y.to('cuda')   
+        
+            logits,loss=model(x,y)
+            loss.backward()
+            
+            norm=torch.nn.utils.clip_grad_norm_(model.parameters(),1.0)
+            optimizer.step()
+            torch.cuda.synchronize()
+            t1=time.time()
+            dt=t1-t0
+            t0=t1
+            tokens_processed=data_loader.B*data_loader.T
+            tokens_per_sec=tokens_processed/dt
+            print(f"it: {it}, loss: {loss:.1f},lr={lr:.4e},dt={dt*1000:.1f}ms, norm:{norm:.1f}, tok/sec={tokens_per_sec:.1f}")
+
 class LR_cosine_with_warmup():
     def __init__(self,max_lr=3e-4,min_lr=6e-5,warmup_iters=100,lr_decay_iters=200):
         self.warmup_iters=warmup_iters
@@ -403,9 +433,11 @@ class LR_cosine_with_warmup():
 
 
 import inspect
+import matplotlib.pyplot as plt
 class Trainer():
-    def __int__(self):
-        pass
+    def __init__(self):
+        self.lr_scheduler=LR_cosine_with_warmup(warmup_iters=10,lr_decay_iters=40)
+        self.batch_size=2**19
 
     def configure_optimizers(self,model, weight_decay, learning_rate, betas, device_type):
         # start with all of the candidate parameters
@@ -433,21 +465,24 @@ class Trainer():
 
         return optimizer
 
-    def train(self,model,data_loader,steps=50, lr=3e-4):
+    def train(self,model,data_loader,steps=50):
 
-        #optimizer=torch.optim.AdamW(model.parameters(),lr=lr,betas=(0.9,0.95),eps=1e-8)
-        optimizer=self.configure_optimizers(model,0.1,lr,(0.9,0.95),str(model.get_device()))
-        lr_scheduler=LR_cosine_with_warmup(warmup_iters=10,lr_decay_iters=40)
+        optimizer=self.configure_optimizers(model,0.1,self.lr_scheduler.max_lr,(0.9,0.95),str(model.get_device()))
+        lr_scheduler=self.lr_scheduler
         t0=time.time()
 
-        total_batch_size=2**19 #0.5M
         B=data_loader.B
         T=data_loader.T
-        grad_accum_steps=total_batch_size//(B*T)
+        batch_size=self.batch_size
+
+        grad_accum_steps=batch_size//(B*T)
+        train_losses=[]
+        val_losses=[]
         for it in range(steps):
+            model.train()
             optimizer.zero_grad()
             loss_accum=0
-            for micro_batch in range(grad_accum_steps):
+            for mini_batch in range(grad_accum_steps):
                 x,y=data_loader.next_batch()
                 x=x.to('cuda')
                 y=y.to('cuda')   
@@ -457,6 +492,7 @@ class Trainer():
                 loss=loss/ grad_accum_steps#normalize
                 loss_accum+=loss.detach() 
                 loss.backward()
+                print (f"it: {it}, mini batch: {mini_batch}/{grad_accum_steps}",end='\r')
             
             norm=torch.nn.utils.clip_grad_norm_(model.parameters(),1.0)
             lr=lr_scheduler.get_lr(it)
@@ -464,6 +500,7 @@ class Trainer():
                 param_group['lr']=lr
             optimizer.step()
             torch.cuda.synchronize()
+            train_losses.append(loss_accum.item())
             t1=time.time()
             dt=t1-t0
             t0=t1
@@ -472,5 +509,28 @@ class Trainer():
             print(f"it: {it}, loss: {loss_accum:.1f},lr={lr:.4e},dt={dt*1000:.1f}ms, norm:{norm:.1f}, tok/sec={tokens_per_sec:.1f}")
 
 
+            #validations
+            model.eval()
+            
+            val_secs=3
+            with torch.no_grad():
+                loss_accum=0
+                for mini_batch in range(val_secs):
+                    x,y=data_loader.next_batch()
+                    x=x.to('cuda')
+                    y=y.to('cuda')   
+            
+                    #with torch.autocast(device_type=str(model.get_device()),dtype=torch.bfloat16):
+                    logits,loss=model(x,y)
+                    loss=loss/ val_secs#normalize
+                    loss_accum+=loss.detach()
+                val_losses.append(loss_accum.item()) 
 
-
+        plt.plot(range(1, steps+1), train_losses, label='Training Loss')
+        plt.plot(range(1, steps+1), val_losses, label='Validation Loss')
+        plt.xlabel('steps')
+        plt.ylabel('Loss')
+        plt.title('Training and Validation Loss')
+        plt.legend()
+        plt.grid()
+        plt.show()
