@@ -9,8 +9,8 @@ from dg_lib2 import DataLoader, Trainer,Trainer_base
 B,T=8,1024 #minibatch and legth 
 batch_size=2**19 #batch size
 
-B,T=2,32 #minibatch and legth 
-batch_size=4*32 #batch size
+B,T=4,1024 #minibatch and legth 
+batch_size=4*1024*2 #batch size
 
 
 #scheduler
@@ -20,7 +20,7 @@ warmup_iters=10
 lr_decay_iters=20
 
 #iters
-steps=50
+steps=100
 
 #dataloader
 dl=DataLoader(B,T)
@@ -48,10 +48,13 @@ trainer.lr_scheduler.lr_decay_iters=lr_decay_iters
 torch.compile()
 
 #train
+trainer.load_checkpoint('../../checkpoints/cp1.cp')
 trainer.train(model,dl,steps)
-
+trainer.save_checkpoint('../../checkpoints/cp1.cp')
+trainer.train(model,dl,steps)
+trainer.save_checkpoint('../../checkpoints/cp1.cp')
 #save
-model.save_safetensor(("../../checkpoints/dg.safetensors"))
+model.save_safetensor(("../../checkpoints/dg2.safetensors"))
 
 
 

@@ -11,19 +11,19 @@ torch.cuda.manual_seed(0)
 
 
 num_return_sequences=2
-max_length=30
-prompt="hello my name is"
+max_length=100
+prompt="We are accounted poor citizens"
 
 #Load from HF
-model=HF_GPT2.from_pretrained('gpt2')
+#model=HF_GPT2.from_pretrained('gpt2')
 #save
-model.save_safetensor("../../checkpoints/gpt2.safetensors")
+#model.save_safetensor("../../checkpoints/gpt2.safetensors")
 
 #load local file
 config=GPTConfig()
 config.n_layer=12
 model=HF_GPT2(config)           
-model.load_safetensor("../../checkpoints/gpt2.safetensors")
+#model.load_safetensor("../../checkpoints/gpt2.safetensors")
 model.load_safetensor("../../checkpoints/dg.safetensors")
 
 

@@ -360,19 +360,40 @@ class HF_GPT2(nn.Module):
         self.transformer.wte.weight = self.lm_head.weight
 
 
+
+from torch.utils.data import Dataset, DataLoader, random_split
 class DataLoader():
     def __init__(self,B,T):
         self.B=B
         self.T=T
-        pass
+        self.tokens_per_batch=B*T
+        self.batches_per_epoch=0
+        self.training=[]
+        self.validate=[]
 
-    def load_txt(self,fpath):
+    def load_txt(self,fpath,train_ratio=0.9):
         with open(fpath,'r') as f:
             text=f.read()        
         enc=tiktoken.get_encoding('gpt2')
         tokens=enc.encode(text)
         self.tokens=torch.tensor(tokens)
+        self.batches_per_epoch=len(self.tokens)//self.tokens_per_batch
+        batches=range(self.batches_per_epoch)
+
+        train_size = int(self.batches_per_epoch * train_ratio)
+        val_size = self.batches_per_epoch - train_size
+        self.train_indices, self.val_indices = random_split(batches, [train_size, val_size])
+
         self.curr_pos=0
+        self.curr_train_pos=0
+        self.curr_val_pos=0
+
+        print(f"tokens: {len(self.tokens)}")
+        print(f"batch size: {self.tokens_per_batch}")
+        print(f"Batches: {self.batches_per_epoch}")
+        print(f"training batches: {len(self.train_indices)}")
+        print(f"validation batches: {len(self.val_indices)}")
+
     
     def next_batch(self):
         buf=self.tokens[self.curr_pos:self.curr_pos+self.B*self.T+1]
@@ -382,6 +403,27 @@ class DataLoader():
         if self.curr_pos+(self.B*self.T+1)>len(self.tokens):
             self.curr_pos=0
         return x,y
+    
+    def next_train_batch(self):
+        start_pos=self.train_indices[self.curr_train_pos]
+        buf=self.tokens[start_pos:start_pos+self.B*self.T+1]
+        x=(buf[:-1]).view(self.B,self.T)
+        y=(buf[1:]).view(self.B,self.T)
+        self.curr_train_pos=self.curr_train_pos+1
+        if self.curr_train_pos>=len(self.train_indices):
+            self.curr_train_pos=0
+        return x,y
+    
+    def next_val_batch(self):
+        start_pos=self.val_indices[self.curr_val_pos]
+        buf=self.tokens[start_pos:start_pos+self.B*self.T+1]
+        x=(buf[:-1]).view(self.B,self.T)
+        y=(buf[1:]).view(self.B,self.T)
+        self.curr_val_pos=self.curr_val_pos+1
+        if self.curr_val_pos>=len(self.val_indices):
+            self.curr_val_pos=0
+        return x,y
+
     
 
 class Trainer_base():
@@ -438,6 +480,7 @@ class Trainer():
     def __init__(self):
         self.lr_scheduler=LR_cosine_with_warmup(warmup_iters=10,lr_decay_iters=40)
         self.batch_size=2**19
+        self.checkpoint={}
 
     def configure_optimizers(self,model, weight_decay, learning_rate, betas, device_type):
         # start with all of the candidate parameters
@@ -468,6 +511,19 @@ class Trainer():
     def train(self,model,data_loader,steps=50):
 
         optimizer=self.configure_optimizers(model,0.1,self.lr_scheduler.max_lr,(0.9,0.95),str(model.get_device()))
+        step=0
+        train_losses=[]
+        val_losses=[]
+        #check if we have configured the optimizer before
+        if self.checkpoint:
+            optimizer.load_state_dict(self.checkpoint['optimizer_state_dict'])
+            step=self.checkpoint['step']
+            model.load_state_dict(self.checkpoint['model_state_dict'])
+            model.transformer.wte.weight = model.lm_head.weight
+
+            train_losses=self.checkpoint['train_losses']
+            val_losses=self.checkpoint['val_losses']
+        
         lr_scheduler=self.lr_scheduler
         t0=time.time()
 
@@ -476,14 +532,14 @@ class Trainer():
         batch_size=self.batch_size
 
         grad_accum_steps=batch_size//(B*T)
-        train_losses=[]
-        val_losses=[]
-        for it in range(steps):
+        
+        for it in range(step,step+steps):
+            
             model.train()
             optimizer.zero_grad()
             loss_accum=0
             for mini_batch in range(grad_accum_steps):
-                x,y=data_loader.next_batch()
+                x,y=data_loader.next_train_batch()
                 x=x.to('cuda')
                 y=y.to('cuda')   
             
@@ -492,7 +548,7 @@ class Trainer():
                 loss=loss/ grad_accum_steps#normalize
                 loss_accum+=loss.detach() 
                 loss.backward()
-                print (f"it: {it}, mini batch: {mini_batch}/{grad_accum_steps}",end='\r')
+                print (f"it: {it}, mini batch: {mini_batch+1}/{grad_accum_steps}",end='\r')
             
             norm=torch.nn.utils.clip_grad_norm_(model.parameters(),1.0)
             lr=lr_scheduler.get_lr(it)
@@ -516,7 +572,7 @@ class Trainer():
             with torch.no_grad():
                 loss_accum=0
                 for mini_batch in range(val_secs):
-                    x,y=data_loader.next_batch()
+                    x,y=data_loader.next_val_batch()
                     x=x.to('cuda')
                     y=y.to('cuda')   
             
@@ -526,11 +582,26 @@ class Trainer():
                     loss_accum+=loss.detach()
                 val_losses.append(loss_accum.item()) 
 
-        plt.plot(range(1, steps+1), train_losses, label='Training Loss')
-        plt.plot(range(1, steps+1), val_losses, label='Validation Loss')
+        # Save checkpoint
+        self.checkpoint = {
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'step': it + 1,
+            'train_losses':train_losses,
+            'val_losses':val_losses
+        }
+        
+        plt.plot(range(1, step+steps+1), train_losses, label='Training Loss')
+        plt.plot(range(1, step+steps+1), val_losses, label='Validation Loss')
         plt.xlabel('steps')
         plt.ylabel('Loss')
         plt.title('Training and Validation Loss')
         plt.legend()
         plt.grid()
         plt.show()
+    def save_checkpoint(self,checkpoint_path  ):
+        torch.save(self.checkpoint, checkpoint_path)
+
+    def load_checkpoint(self,checkpoint_path):
+        self.checkpoint = torch.load(checkpoint_path)
+        
