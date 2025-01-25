@@ -1,18 +1,21 @@
 from datasets import load_dataset
-# use name="sample-10BT" to use the 10BT sample
-#fw = load_dataset("HuggingFaceFW/fineweb-edu", name="CC-MAIN-2024-10", split="train", streaming=True)
 
-fw = load_dataset("HuggingFaceFW/fineweb-edu", name="sample-10BT", split="train", streaming=True)
+import pickle
+import gzip
 
-# Read a sample of 5 records
-sample = []
-for i, record in enumerate(fw):
-    sample.append(record)  # Collect the record
-    if i >= 4:  # Stop after 5 records
-        break
+from torch.utils.data import Dataset, DataLoader
 
-# Display the sample
-for idx, rec in enumerate(sample):
-    print(f"Record {idx + 1}:\n{rec}\n")
-    
-print("hello")
+
+import torch
+# lets do som predictions
+import tiktoken
+
+from dg_lib2 import HF_GPT2, GPTConfig
+from dg_lib2 import DataLoader, Trainer,Trainer_base,FineWebDataset
+
+
+
+a=FineWebDataset()
+a.download_records(1e6)
+#records=a.load_local()
+#records[0]

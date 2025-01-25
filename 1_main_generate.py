@@ -24,7 +24,7 @@ config=GPTConfig()
 config.n_layer=12
 model=HF_GPT2(config)           
 #model.load_safetensor("../../checkpoints/gpt2.safetensors")
-model.load_safetensor("../../checkpoints/dg.safetensors")
+model.load_safetensor("../../checkpoints/dg2.safetensors")
 
 
 #generate

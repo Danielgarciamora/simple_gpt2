@@ -359,9 +359,41 @@ class HF_GPT2(nn.Module):
         #shared memory
         self.transformer.wte.weight = self.lm_head.weight
 
+import pickle
+import gzip
+from datasets import load_dataset
+class FineWebDataset():
+    def __init__(self):
+        self.records=[]
+    def download_records(self,samples_per_file=10000,file_count=4,folder='../../data/'):
+        fw = load_dataset("HuggingFaceFW/fineweb-edu", name="sample-10BT", split="train", streaming=True)
+        
+        sample = []
+        rec_id=0
+        file_id=0
+        for i, record in enumerate(fw):
+            sample.append(record)  # Collect the record
+            rec_id+=1
+            print(f"file: {file_id},  rec: {i}",end='\r')
+            if rec_id >= samples_per_file:  # Stop after 5 records
+                # Save records to a compressed file
+                with gzip.open(f"{folder}fineweb_records_{samples_per_file}_{file_id}.pkl.gz", "wb") as f:
+                    pickle.dump(sample, f)
+                sample=[]
+                rec_id=0
+                file_id+=1
+                if file_id>=file_count:
+                    break
+    
+    def load_local(self,fpath):
+        # Load records from the compressed file
+        with gzip.open(fpath, "rb") as f:
+            self.records = pickle.load(f)
+        return self.records
 
 
 from torch.utils.data import Dataset, DataLoader, random_split
+import concurrent.futures
 class DataLoader():
     def __init__(self,B,T):
         self.B=B
@@ -377,6 +409,76 @@ class DataLoader():
         enc=tiktoken.get_encoding('gpt2')
         tokens=enc.encode(text)
         self.tokens=torch.tensor(tokens)
+        self.batches_per_epoch=len(self.tokens)//self.tokens_per_batch
+        batches=range(self.batches_per_epoch)
+
+        train_size = int(self.batches_per_epoch * train_ratio)
+        val_size = self.batches_per_epoch - train_size
+        self.train_indices, self.val_indices = random_split(batches, [train_size, val_size])
+
+        self.curr_pos=0
+        self.curr_train_pos=0
+        self.curr_val_pos=0
+
+        print(f"tokens: {len(self.tokens)}")
+        print(f"batch size: {self.tokens_per_batch}")
+        print(f"Batches: {self.batches_per_epoch}")
+        print(f"training batches: {len(self.train_indices)}")
+        print(f"validation batches: {len(self.val_indices)}")
+
+    def load_local_fineweb(self,fpath,train_ratio=0.9,num_threads=24):
+
+        enc = tiktoken.get_encoding('gpt2')
+        print("loading data ...")
+        dataset = FineWebDataset()
+        records = dataset.load_local(fpath)
+        tokens = []
+
+        # Function to encode a chunk of records
+        def encode_chunk(records_chunk):
+            chunk_tokens = []
+            for i,rec in enumerate(records_chunk):
+                t = enc.encode(rec['text'])
+                t.append(enc.eot_token)
+                chunk_tokens += t
+                # Print progress for the current chunk
+                #print(f"Thread {chunk_index+1}/{total_chunks}: {i+1}/{len(records_chunk)}", end='\r')
+                print(f"thread progress: {i}/{len(records_chunk)}", end='\r')
+            #return chunk_tokens
+            return torch.tensor(chunk_tokens
+
+        # Divide the records into chunks for each thread
+        chunk_size = len(records) // num_threads
+        chunks = [records[i:i + chunk_size] for i in range(0, len(records), chunk_size)]
+
+        print("encoding ...")
+
+        # Use ThreadPoolExecutor to execute each chunk in a separate thread
+        with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
+            # Execute encode_chunk for each chunk in parallel
+            results = list(executor.map(encode_chunk, chunks))
+
+        # Join all the results into a single token list
+        for result in results:
+            tokens += result
+        #self.tokens=torch.tensor(tokens)
+        self.tokens=tokens
+        print(f"Encoding completed: {len(tokens)} tokens processed.")
+        ##single thread encoding
+        #enc=tiktoken.get_encoding('gpt2')
+        #print("loading data ...")
+        #dataset=FineWebDataset()        
+        #records=dataset.load_local(fpath)
+        #tokens=[]
+        #print("encoding ...")
+        #for i,rec in enumerate(records):
+        #    t=enc.encode(rec['text'])
+        #    t.append(enc.eot_token)
+        #    tokens+=t
+        #    print(f"sample: {i}/ {len(records)}",end='\r')
+        #self.tokens=torch.tensor(tokens)
+
+        
         self.batches_per_epoch=len(self.tokens)//self.tokens_per_batch
         batches=range(self.batches_per_epoch)
 

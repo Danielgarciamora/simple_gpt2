@@ -10,7 +10,8 @@ B,T=8,1024 #minibatch and legth
 batch_size=2**19 #batch size
 
 B,T=4,1024 #minibatch and legth 
-batch_size=4*1024*2 #batch size
+batch_size=4*1024*8 #batch size
+#batch_size=2**19 #batch size
 
 
 #scheduler
@@ -24,7 +25,7 @@ steps=1000
 
 #dataloader
 dl=DataLoader(B,T)
-data=dl.load_txt('../../data/tinyshakespeare/input.txt')
+data=dl.load_local_fineweb('../../data/fineweb_records_1000000.0_0.pkl.gz')
 #tokens=dl.next_batch()
 
 #model config
