@@ -330,7 +330,15 @@ class HF_GPT2(nn.Module):
             logits=logits[:,-1,:]/temp
             probs=nn.functional.softmax(logits,dim=-1)
             #sample
-            idx_next=torch.multinomial(probs,num_samples=1)
+            idx_next=torch.multinomial(probs,num_samples=1)            
+
+            # Check which sequences have reached the EOT token
+            eot_mask = (idx_next == enc.eot_token).squeeze(1)  # Shape: (batch_size,)
+
+            # If all sequences in the batch have reached EOT, stop early
+            if eot_mask.all():
+                break
+
             #append sample to the sequence and repeat
             idx=torch.cat((idx,idx_next),dim=1)    
         
@@ -342,6 +350,7 @@ class HF_GPT2(nn.Module):
             response.append(decoded)
 
         return response
+    
     def save_safetensor(self,path):
         # temporary clone before saving 
         self.transformer.wte.weight=torch.nn.Parameter(self.transformer.wte.weight.clone())
@@ -391,112 +400,315 @@ class FineWebDataset():
             self.records = pickle.load(f)
         return self.records
 
+#class HuggingFaceDataset():
+#    def __init__(self):
+#        self.records=[]
+#        self.fw=None
+#    def load_fineweb(self):
+#        self.fw = load_dataset("HuggingFaceFW/fineweb-edu", name="sample-10BT", split="train", streaming=True)
+#        
+#    def load_localopenweb(self,path="../../data/openwebtext/git/subsets",cache="../../data/openwebtext/cache"):
+#            self.fw = load_dataset(path,"default",streaming=True)
+#
+#        
+#    def download_records(self,file_name,samples_per_file=10000,file_count=4,folder='../../data/'):
+#        sample = []
+#        rec_id=0
+#        file_id=0
+#        for i, record in enumerate(self.fw):
+#            sample.append(record)  # Collect the record
+#            rec_id+=1
+#            print(f"file: {file_id},  rec: {i}",end='\r')
+#            if rec_id >= samples_per_file:  # Stop after 5 records
+#                # Save records to a compressed file
+#                with gzip.open(f"{folder}{file_name}_{samples_per_file}_{file_id}.pkl.gz", "wb") as f:
+#                    pickle.dump(sample, f)
+#                sample=[]
+#                rec_id=0
+#                file_id+=1
+#                if file_id>=file_count:
+#                    break
+#    
+#    def load_local(self,fpath):
+#        # Load records from the compressed file
+#        with gzip.open(fpath, "rb") as f:
+#            self.records = pickle.load(f)
+#        return self.records
 
+            
 from torch.utils.data import Dataset, DataLoader, random_split
+import os.path, json
+
 import concurrent.futures
 class DataLoader():
     def __init__(self,B,T):
+        self.records=[]
         self.B=B
         self.T=T
         self.tokens_per_batch=B*T
         self.batches_per_epoch=0
         self.training=[]
-        self.validate=[]
-
-    def load_txt(self,fpath,train_ratio=0.9):
-        with open(fpath,'r') as f:
-            text=f.read()        
-        enc=tiktoken.get_encoding('gpt2')
-        tokens=enc.encode(text)
-        self.tokens=torch.tensor(tokens)
-        self.batches_per_epoch=len(self.tokens)//self.tokens_per_batch
-        batches=range(self.batches_per_epoch)
-
-        train_size = int(self.batches_per_epoch * train_ratio)
-        val_size = self.batches_per_epoch - train_size
-        self.train_indices, self.val_indices = random_split(batches, [train_size, val_size])
+        self.validate=[]    
+        self.train_ratio=0.8
 
         self.curr_pos=0
         self.curr_train_pos=0
         self.curr_val_pos=0
 
+    def print_train_summary(self):
+        self.batches_per_epoch=len(self.tokens)//self.tokens_per_batch
+
         print(f"tokens: {len(self.tokens)}")
         print(f"batch size: {self.tokens_per_batch}")
-        print(f"Batches: {self.batches_per_epoch}")
-        print(f"training batches: {len(self.train_indices)}")
-        print(f"validation batches: {len(self.val_indices)}")
+        print(f"Batches: {self.batches_per_epoch}")        
 
-    def load_local_fineweb(self,fpath,train_ratio=0.9,num_threads=24):
+    def load_txt(self,fpath,train_ratio=0.9):
+        with open(fpath,'r', encoding="utf8") as f:
+            text=f.read()    
+            records=text.split("\n")
+            self.records+=records    
+        
+    #def load_dailydialog2(self,fpath):
+    #    enc = tiktoken.get_encoding('gpt2')
+    #    with open(fpath,'r', encoding="utf8") as f:
+    #        text=f.read()        
+    #    dialogs=text.split('\n')
+    #    for i in range(len(dialogs)):
+    #        dialogs[i]=dialogs[i].split(" __eou__ ")
+    #        perid=0
+    #        for j in range(len(dialogs[i])):
+    #            dialogs[i][j]=f"person{perid}: {dialogs[i][j]}"
+    #            if perid==0:
+    #                perid=1
+    #            else:
+    #                perid=0
+    #    tokens=[]
+    #    for i in range(len(dialogs)):
+    #        for j in range(len(dialogs[i])):
+    #           t=enc.encode(dialogs[i][j])
+    #           t.append(enc.eot_token)
+    #           tokens+=t
+    #    self.tokens=torch.tensor(tokens)
+#
+    #    
+    #    self.batches_per_epoch=len(self.tokens)//self.tokens_per_batch
+    #    batches=range(self.batches_per_epoch)
+#
+    #    train_size = int(self.batches_per_epoch * self.train_ratio)
+    #    val_size = self.batches_per_epoch - train_size
+    #    self.train_indices, self.val_indices = random_split(batches, [train_size, val_size])
+#
+    #    self.curr_pos=0
+    #    self.curr_train_pos=0
+    #    self.curr_val_pos=0
+#
+    #    print(f"tokens: {len(self.tokens)}")
+    #    print(f"batch size: {self.tokens_per_batch}")
+    #    print(f"Batches: {self.batches_per_epoch}")
+    #    print(f"training batches: {len(self.train_indices)}")
+    #    print(f"validation batches: {len(self.val_indices)}")
+#
+    #    return tokens
 
-        enc = tiktoken.get_encoding('gpt2')
+    #def load_local_fineweb2(self,fpath,train_ratio=0.9,num_threads=24):
+    #    
+    #    # Function to encode a chunk of records
+    #    def encode_chunk(chunk_index, records_chunk):
+    #        chunk_tokens = []
+    #        for i,rec in enumerate(records_chunk):
+    #            t = enc.encode(rec['text'])
+    #            t.append(enc.eot_token)
+    #            chunk_tokens += t                
+    #            print(f"thread progress: {i}/{len(records_chunk)}", end='\r')
+    #        
+    #        print(f"\nTo tensor chunck: {chunk_index}")
+    #        return chunk_index, torch.tensor(chunk_tokens)            
+#
+    #    enc = tiktoken.get_encoding('gpt2')
+    #    print("loading data ...")
+    #    dataset = FineWebDataset()
+    #    records = dataset.load_local(fpath)
+    #    
+    #    # Divide the records into chunks for each thread
+    #    chunk_size = len(records) // num_threads
+    #    chunks = [records[i:i + chunk_size] for i in range(0, len(records), chunk_size)]
+    #    print("encoding ...")
+    #    # Use ThreadPoolExecutor to execute each chunk in a separate thread
+    #    with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
+    #        # Execute encode_chunk for each chunk in parallel
+    #        #results = list(executor.map(encode_chunk, chunks))
+    #        results = list(executor.map(lambda x: encode_chunk(x[0], x[1]), enumerate(chunks)))
+    #    print("Assembling tokens...")
+    #    results.sort(key=lambda x: x[0])  # Sort by original chunk index        
+    #    self.tokens = torch.cat([chunk[1] for chunk in results])
+    #    #self.tokens = torch.tensor([token for _, chunk in results for token in chunk])
+    #            
+    #    #self.tokens=tokens
+    #    print(f"Encoding completed: {len(self.tokens)} tokens processed.")
+    #    
+    #    self.batches_per_epoch=len(self.tokens)//self.tokens_per_batch
+    #    batches=range(self.batches_per_epoch)
+    #    idxfile=fpath+".dix"
+    #    if os.path.isfile(idxfile):
+    #        self.load_token_indices(idxfile)
+    #    else:
+    #        train_size = int(self.batches_per_epoch * train_ratio)
+    #        val_size = self.batches_per_epoch - train_size
+    #        self.train_indices, self.val_indices = random_split(batches, [train_size, val_size])
+    #        self.save_token_indices(idxfile)
+    #                            
+    #    self.curr_pos=0
+    #    self.curr_train_pos=0
+    #    self.curr_val_pos=0
+    #
+    #    print(f"tokens: {len(self.tokens)}")
+    #    print(f"batch size: {self.tokens_per_batch}")
+    #    print(f"Batches: {self.batches_per_epoch}")
+    #    print(f"training batches: {len(self.train_indices)}")
+    #    print(f"validation batches: {len(self.val_indices)}")
+
+    def load_local_fineweb(self,fpath,train_ratio=0.9,num_threads=24):    
         print("loading data ...")
         dataset = FineWebDataset()
         records = dataset.load_local(fpath)
-        tokens = []
+        records=[rec["text"] for rec in records]
+        self.records+=records
+        print("data loaded")
 
+    def load_dailydialog(self,fpath):        
+        with open(fpath,'r', encoding="utf8") as f:
+            text=f.read()        
+        dialogs=text.split('\n')
+        for i in range(len(dialogs)):
+            dialogs[i]=dialogs[i].split(" __eou__ ")
+            perid=0
+            for j in range(len(dialogs[i])):
+                dialogs[i][j]=f"person{perid}: {dialogs[i][j]}"
+                if perid==0:
+                    perid=1
+                else:
+                    perid=0
+        records=[]        
+        for dialog in dialogs:
+            record=""         
+            for line in dialog:
+                record+=line+"\n"
+            records.append(record)
+        self.records+=records
+        #print("a")       
+
+    def rand_split(self,train_ratio=0.8):
+        l=len(self.records)
+        train_size = int(l * train_ratio)
+        val_size = l - train_size
+        train_indices, val_indices = random_split(range(l), [train_size, val_size])        
+        self.train_records=[self.records[i] for i in train_indices]
+        self.val_records=[self.records[i] for i in val_indices]
+
+    def __encode_records(self,records,num_threads=24):        
         # Function to encode a chunk of records
-        def encode_chunk(records_chunk):
+        def encode_chunk(chunk_index, records_chunk):
             chunk_tokens = []
             for i,rec in enumerate(records_chunk):
-                t = enc.encode(rec['text'])
+                t = enc.encode(rec,allowed_special={'<|endoftext|>'})
                 t.append(enc.eot_token)
                 chunk_tokens += t
-                # Print progress for the current chunk
-                #print(f"Thread {chunk_index+1}/{total_chunks}: {i+1}/{len(records_chunk)}", end='\r')
-                print(f"thread progress: {i}/{len(records_chunk)}", end='\r')
-            #return chunk_tokens
-            return torch.tensor(chunk_tokens
+                if chunk_index==0:               
+                    print(f"thread progress: {i}/{len(records_chunk)}", end='\r')
+            
+            if chunk_index==0:
+                print(f"\nTo tensor chunck")
+            return chunk_index, torch.tensor(chunk_tokens)            
 
+        enc = tiktoken.get_encoding('gpt2')
+        
+        
         # Divide the records into chunks for each thread
         chunk_size = len(records) // num_threads
         chunks = [records[i:i + chunk_size] for i in range(0, len(records), chunk_size)]
-
+        
         print("encoding ...")
-
         # Use ThreadPoolExecutor to execute each chunk in a separate thread
         with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
             # Execute encode_chunk for each chunk in parallel
-            results = list(executor.map(encode_chunk, chunks))
-
-        # Join all the results into a single token list
-        for result in results:
-            tokens += result
-        #self.tokens=torch.tensor(tokens)
-        self.tokens=tokens
-        print(f"Encoding completed: {len(tokens)} tokens processed.")
-        ##single thread encoding
-        #enc=tiktoken.get_encoding('gpt2')
-        #print("loading data ...")
-        #dataset=FineWebDataset()        
-        #records=dataset.load_local(fpath)
-        #tokens=[]
-        #print("encoding ...")
-        #for i,rec in enumerate(records):
-        #    t=enc.encode(rec['text'])
-        #    t.append(enc.eot_token)
-        #    tokens+=t
-        #    print(f"sample: {i}/ {len(records)}",end='\r')
-        #self.tokens=torch.tensor(tokens)
-
-        
-        self.batches_per_epoch=len(self.tokens)//self.tokens_per_batch
-        batches=range(self.batches_per_epoch)
-
-        train_size = int(self.batches_per_epoch * train_ratio)
-        val_size = self.batches_per_epoch - train_size
-        self.train_indices, self.val_indices = random_split(batches, [train_size, val_size])
-
-        self.curr_pos=0
-        self.curr_train_pos=0
-        self.curr_val_pos=0
-
-        print(f"tokens: {len(self.tokens)}")
-        print(f"batch size: {self.tokens_per_batch}")
-        print(f"Batches: {self.batches_per_epoch}")
-        print(f"training batches: {len(self.train_indices)}")
-        print(f"validation batches: {len(self.val_indices)}")
-
+            #results = list(executor.map(encode_chunk, chunks))
+            results = list(executor.map(lambda x: encode_chunk(x[0], x[1]), enumerate(chunks)))
+        print("Assembling tokens...")
+        results.sort(key=lambda x: x[0])  # Sort by original chunk index        
+        tokens = torch.cat([chunk[1] for chunk in results])
+        return tokens
     
+    def encode(self):
+        self.train_tokens=self.__encode_records(self.train_records)
+        self.val_tokens=self.__encode_records(self.val_records)
+
+    #def save_token(self,save_path,tokens):
+    #    print(f"Saving data to {save_path} ...")
+    #   
+    #    with gzip.open(save_path, "wb") as f:
+    #        pickle.dump(tokens, f, protocol=pickle.HIGHEST_PROTOCOL)
+    #    print("Data saved successfully.")
+#
+#
+    #def save_tokens(self,save_path):
+    #    print(f"Saving data to {save_path} ...")
+    #    data = {                        
+    #        "train": self.train_tokens,
+    #        "val": self.val_tokens
+    #    }
+    #    with gzip.open(save_path, "wb") as f:
+    #        pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
+    #    print("Data saved successfully.")
+#
+    #def save_token3(self, save_path, tokens, chunk_size_gb=1):
+    #    """
+    #    Saves a large token list in multiple 1GB compressed shards.
+#
+    #    :param save_path: Base path for saving the files.
+    #    :param tokens: List of tokens to be saved.
+    #    :param chunk_size_gb: Maximum size per file in GB (default: 1GB).
+    #    """
+    #    chunk_size_bytes = chunk_size_gb * (1024 ** 3)  # Convert GB to Bytes
+    #    total_size = len(pickle.dumps(tokens, protocol=pickle.HIGHEST_PROTOCOL))  # Estimate total size
+    #    num_chunks = max(1, total_size // chunk_size_bytes + (1 if total_size % chunk_size_bytes else 0))
+#
+    #    print(f"Total estimated size: {total_size / (1024**3):.2f} GB, Splitting into {num_chunks} chunks...")
+#
+    #    chunk_length = len(tokens) // num_chunks  # Approximate tokens per chunk
+#
+    #    for i in range(num_chunks):
+    #        start_idx = i * chunk_length
+    #        end_idx = None if i == num_chunks - 1 else (i + 1) * chunk_length
+    #        chunk = tokens[start_idx:end_idx]
+#
+    #        chunk_path = f"{save_path}_part{i + 1}.pkl.gz"
+    #        with gzip.open(chunk_path, "wb") as f:
+    #            pickle.dump(chunk, f, protocol=pickle.HIGHEST_PROTOCOL)
+#
+    #        print(f"Saved chunk {i + 1} to {chunk_path}, containing {len(chunk)} tokens.")
+#
+    #    print("All chunks saved successfully.")
+#
+    #def save_token_indices(self, save_path):
+    #    print(f"Saving data to {save_path} ...")
+    #    data = {                        
+    #        "train_indices": self.train_indices,
+    #        "val_indices": self.val_indices
+    #    }
+    #    with gzip.open(save_path, "wb") as f:
+    #        pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
+    #    print("Data saved successfully.")
+#
+    #def load_token_indices(self, load_path):
+    #    print(f"Loading data from {load_path} ...")
+    #    with gzip.open(load_path, "rb") as f:
+    #        data = pickle.load(f)
+    #    #self.tokens = data["tokens"]
+    #    self.train_indices = data["train_indices"]
+    #    self.val_indices = data["val_indices"]        
+    #    print("Data loaded successfully.")        
+
+
     def next_batch(self):
         buf=self.tokens[self.curr_pos:self.curr_pos+self.B*self.T+1]
         x=(buf[:-1]).view(self.B,self.T)
@@ -507,26 +719,25 @@ class DataLoader():
         return x,y
     
     def next_train_batch(self):
-        start_pos=self.train_indices[self.curr_train_pos]
-        buf=self.tokens[start_pos:start_pos+self.B*self.T+1]
+        buf=self.train_tokens[self.curr_train_pos:self.curr_train_pos+self.B*self.T+1]
         x=(buf[:-1]).view(self.B,self.T)
         y=(buf[1:]).view(self.B,self.T)
-        self.curr_train_pos=self.curr_train_pos+1
-        if self.curr_train_pos>=len(self.train_indices):
+        self.curr_train_pos=self.curr_train_pos+self.B*self.T
+        if self.curr_train_pos+(self.B*self.T+1)>len(self.train_tokens):
             self.curr_train_pos=0
         return x,y
     
     def next_val_batch(self):
-        start_pos=self.val_indices[self.curr_val_pos]
-        buf=self.tokens[start_pos:start_pos+self.B*self.T+1]
+        buf=self.val_tokens[self.curr_val_pos:self.curr_val_pos+self.B*self.T+1]
         x=(buf[:-1]).view(self.B,self.T)
         y=(buf[1:]).view(self.B,self.T)
-        self.curr_val_pos=self.curr_val_pos+1
-        if self.curr_val_pos>=len(self.val_indices):
+        self.curr_val_pos=self.curr_val_pos+self.B*self.T
+        if self.curr_val_pos+(self.B*self.T+1)>len(self.val_tokens):
             self.curr_val_pos=0
         return x,y
 
-    
+    def get_train_token_lenght(self):
+        return len(self.train_tokens)
 
 class Trainer_base():
 #Basic training for reference
@@ -664,15 +875,14 @@ class Trainer():
             t0=t1
             tokens_processed=B*T*grad_accum_steps
             tokens_per_sec=tokens_processed/dt
-            print(f"it: {it}, loss: {loss_accum:.1f},lr={lr:.4e},dt={dt*1000:.1f}ms, norm:{norm:.1f}, tok/sec={tokens_per_sec:.1f}")
-
+            
 
             #validations
             model.eval()
             
             val_secs=3
             with torch.no_grad():
-                loss_accum=0
+                loss_accum_val=0
                 for mini_batch in range(val_secs):
                     x,y=data_loader.next_val_batch()
                     x=x.to('cuda')
@@ -681,8 +891,10 @@ class Trainer():
                     #with torch.autocast(device_type=str(model.get_device()),dtype=torch.bfloat16):
                     logits,loss=model(x,y)
                     loss=loss/ val_secs#normalize
-                    loss_accum+=loss.detach()
-                val_losses.append(loss_accum.item()) 
+                    loss_accum_val+=loss.detach()
+                val_losses.append(loss_accum_val.item()) 
+            
+            print(f"it: {it}, t_loss: {loss_accum:.1f},v_loss: {loss_accum_val:.1f},lr={lr:.4e},dt={dt*1000:.1f}ms, norm:{norm:.1f}, tok/sec={tokens_per_sec:.1f}")
 
         # Save checkpoint
         self.checkpoint = {
