@@ -9,6 +9,9 @@ Response from my model to the prompt "I'm an artificial intelligence":
 Response to Huggingface gpt 2 model:
 ![nanoGPT](image/gpt2_resp.png)
 
+Losses
+![nanoGPT](image/loss.png)
+
 ## Dependencies 
 
 ## Training
