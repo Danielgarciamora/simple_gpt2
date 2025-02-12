@@ -38,8 +38,3 @@ trainer.train(model,dl,steps)
 #save
 model.save_safetensor(("../../checkpoints/dg.safetensors"))
 
-#model.save_statedic("./checkpoint.safetensors")
-
-#uncomment to check initial loss
-#logits,loss=model(x,y)
-#print(loss)

@@ -6,7 +6,7 @@ import tiktoken
 from dataclasses import dataclass
 from safetensors.torch import save_file,load_file
 import time
-
+import matplotlib.pyplot as plt
 @dataclass
 class GPTConfig:
     #vocab_size:int=50304 # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
@@ -17,6 +17,7 @@ class GPTConfig:
     n_embd: int=768
     dropout:float=0
     bias:bool=True
+
 
 class MultiHeadAttention(nn.Module):
     def __init__(self,config:GPTConfig):
@@ -108,7 +109,7 @@ class CausalSelfAttn(nn.Module):
             self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
                                         .view(1, 1, config.block_size, config.block_size))
         
-    def forward(self,x, mask=None):
+    def forward(self,x):
         
         b_size, seq_l, n_embd = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
         
@@ -120,7 +121,7 @@ class CausalSelfAttn(nn.Module):
         k=k.view(b_size,seq_l,self.config.n_head,self.n_head_dim).transpose(1,2)
         v=v.view(b_size,seq_l,self.config.n_head,self.n_head_dim).transpose(1,2)
         
-        if self.flash:#built in attention
+        if self.flash:#built in attention            
             y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None,dropout_p=self.config.dropout if self.training else 0, is_causal=True)
         else: #Manual implementation
             
@@ -278,6 +279,18 @@ class HF_GPT2(nn.Module):
                     sd[k].copy_(sd_hf[k])
         return model
 
+    def get_num_params(self, non_embedding=True):
+        """
+        Return the number of parameters in the model.
+        For non-embedding count (default), the position embeddings get subtracted.
+        The token embeddings would too, except due to the parameter sharing these
+        params are actually used as weights in the final layer, so we include them.
+        """
+        n_params = sum(p.numel() for p in self.parameters())
+        if non_embedding:
+            n_params -= self.transformer.wpe.weight.numel()
+        return n_params
+    
     def forward(self,idx,targets=None):
         #batch size and sequence length
         b,t=idx.size()
@@ -400,41 +413,6 @@ class FineWebDataset():
             self.records = pickle.load(f)
         return self.records
 
-#class HuggingFaceDataset():
-#    def __init__(self):
-#        self.records=[]
-#        self.fw=None
-#    def load_fineweb(self):
-#        self.fw = load_dataset("HuggingFaceFW/fineweb-edu", name="sample-10BT", split="train", streaming=True)
-#        
-#    def load_localopenweb(self,path="../../data/openwebtext/git/subsets",cache="../../data/openwebtext/cache"):
-#            self.fw = load_dataset(path,"default",streaming=True)
-#
-#        
-#    def download_records(self,file_name,samples_per_file=10000,file_count=4,folder='../../data/'):
-#        sample = []
-#        rec_id=0
-#        file_id=0
-#        for i, record in enumerate(self.fw):
-#            sample.append(record)  # Collect the record
-#            rec_id+=1
-#            print(f"file: {file_id},  rec: {i}",end='\r')
-#            if rec_id >= samples_per_file:  # Stop after 5 records
-#                # Save records to a compressed file
-#                with gzip.open(f"{folder}{file_name}_{samples_per_file}_{file_id}.pkl.gz", "wb") as f:
-#                    pickle.dump(sample, f)
-#                sample=[]
-#                rec_id=0
-#                file_id+=1
-#                if file_id>=file_count:
-#                    break
-#    
-#    def load_local(self,fpath):
-#        # Load records from the compressed file
-#        with gzip.open(fpath, "rb") as f:
-#            self.records = pickle.load(f)
-#        return self.records
-
             
 from torch.utils.data import Dataset, DataLoader, random_split
 import os.path, json
@@ -468,105 +446,6 @@ class DataLoader():
             records=text.split("\n")
             self.records+=records    
         
-    #def load_dailydialog2(self,fpath):
-    #    enc = tiktoken.get_encoding('gpt2')
-    #    with open(fpath,'r', encoding="utf8") as f:
-    #        text=f.read()        
-    #    dialogs=text.split('\n')
-    #    for i in range(len(dialogs)):
-    #        dialogs[i]=dialogs[i].split(" __eou__ ")
-    #        perid=0
-    #        for j in range(len(dialogs[i])):
-    #            dialogs[i][j]=f"person{perid}: {dialogs[i][j]}"
-    #            if perid==0:
-    #                perid=1
-    #            else:
-    #                perid=0
-    #    tokens=[]
-    #    for i in range(len(dialogs)):
-    #        for j in range(len(dialogs[i])):
-    #           t=enc.encode(dialogs[i][j])
-    #           t.append(enc.eot_token)
-    #           tokens+=t
-    #    self.tokens=torch.tensor(tokens)
-#
-    #    
-    #    self.batches_per_epoch=len(self.tokens)//self.tokens_per_batch
-    #    batches=range(self.batches_per_epoch)
-#
-    #    train_size = int(self.batches_per_epoch * self.train_ratio)
-    #    val_size = self.batches_per_epoch - train_size
-    #    self.train_indices, self.val_indices = random_split(batches, [train_size, val_size])
-#
-    #    self.curr_pos=0
-    #    self.curr_train_pos=0
-    #    self.curr_val_pos=0
-#
-    #    print(f"tokens: {len(self.tokens)}")
-    #    print(f"batch size: {self.tokens_per_batch}")
-    #    print(f"Batches: {self.batches_per_epoch}")
-    #    print(f"training batches: {len(self.train_indices)}")
-    #    print(f"validation batches: {len(self.val_indices)}")
-#
-    #    return tokens
-
-    #def load_local_fineweb2(self,fpath,train_ratio=0.9,num_threads=24):
-    #    
-    #    # Function to encode a chunk of records
-    #    def encode_chunk(chunk_index, records_chunk):
-    #        chunk_tokens = []
-    #        for i,rec in enumerate(records_chunk):
-    #            t = enc.encode(rec['text'])
-    #            t.append(enc.eot_token)
-    #            chunk_tokens += t                
-    #            print(f"thread progress: {i}/{len(records_chunk)}", end='\r')
-    #        
-    #        print(f"\nTo tensor chunck: {chunk_index}")
-    #        return chunk_index, torch.tensor(chunk_tokens)            
-#
-    #    enc = tiktoken.get_encoding('gpt2')
-    #    print("loading data ...")
-    #    dataset = FineWebDataset()
-    #    records = dataset.load_local(fpath)
-    #    
-    #    # Divide the records into chunks for each thread
-    #    chunk_size = len(records) // num_threads
-    #    chunks = [records[i:i + chunk_size] for i in range(0, len(records), chunk_size)]
-    #    print("encoding ...")
-    #    # Use ThreadPoolExecutor to execute each chunk in a separate thread
-    #    with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
-    #        # Execute encode_chunk for each chunk in parallel
-    #        #results = list(executor.map(encode_chunk, chunks))
-    #        results = list(executor.map(lambda x: encode_chunk(x[0], x[1]), enumerate(chunks)))
-    #    print("Assembling tokens...")
-    #    results.sort(key=lambda x: x[0])  # Sort by original chunk index        
-    #    self.tokens = torch.cat([chunk[1] for chunk in results])
-    #    #self.tokens = torch.tensor([token for _, chunk in results for token in chunk])
-    #            
-    #    #self.tokens=tokens
-    #    print(f"Encoding completed: {len(self.tokens)} tokens processed.")
-    #    
-    #    self.batches_per_epoch=len(self.tokens)//self.tokens_per_batch
-    #    batches=range(self.batches_per_epoch)
-    #    idxfile=fpath+".dix"
-    #    if os.path.isfile(idxfile):
-    #        self.load_token_indices(idxfile)
-    #    else:
-    #        train_size = int(self.batches_per_epoch * train_ratio)
-    #        val_size = self.batches_per_epoch - train_size
-    #        self.train_indices, self.val_indices = random_split(batches, [train_size, val_size])
-    #        self.save_token_indices(idxfile)
-    #                            
-    #    self.curr_pos=0
-    #    self.curr_train_pos=0
-    #    self.curr_val_pos=0
-    #
-    #    print(f"tokens: {len(self.tokens)}")
-    #    print(f"batch size: {self.tokens_per_batch}")
-    #    print(f"Batches: {self.batches_per_epoch}")
-    #    print(f"training batches: {len(self.train_indices)}")
-    #    print(f"validation batches: {len(self.val_indices)}")
-
     def load_local_fineweb(self,fpath,train_ratio=0.9,num_threads=24):    
         print("loading data ...")
         dataset = FineWebDataset()
@@ -642,71 +521,6 @@ class DataLoader():
         self.train_tokens=self.__encode_records(self.train_records)
         self.val_tokens=self.__encode_records(self.val_records)
 
-    #def save_token(self,save_path,tokens):
-    #    print(f"Saving data to {save_path} ...")
-    #   
-    #    with gzip.open(save_path, "wb") as f:
-    #        pickle.dump(tokens, f, protocol=pickle.HIGHEST_PROTOCOL)
-    #    print("Data saved successfully.")
-#
-#
-    #def save_tokens(self,save_path):
-    #    print(f"Saving data to {save_path} ...")
-    #    data = {                        
-    #        "train": self.train_tokens,
-    #        "val": self.val_tokens
-    #    }
-    #    with gzip.open(save_path, "wb") as f:
-    #        pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
-    #    print("Data saved successfully.")
-#
-    #def save_token3(self, save_path, tokens, chunk_size_gb=1):
-    #    """
-    #    Saves a large token list in multiple 1GB compressed shards.
-#
-    #    :param save_path: Base path for saving the files.
-    #    :param tokens: List of tokens to be saved.
-    #    :param chunk_size_gb: Maximum size per file in GB (default: 1GB).
-    #    """
-    #    chunk_size_bytes = chunk_size_gb * (1024 ** 3)  # Convert GB to Bytes
-    #    total_size = len(pickle.dumps(tokens, protocol=pickle.HIGHEST_PROTOCOL))  # Estimate total size
-    #    num_chunks = max(1, total_size // chunk_size_bytes + (1 if total_size % chunk_size_bytes else 0))
-#
-    #    print(f"Total estimated size: {total_size / (1024**3):.2f} GB, Splitting into {num_chunks} chunks...")
-#
-    #    chunk_length = len(tokens) // num_chunks  # Approximate tokens per chunk
-#
-    #    for i in range(num_chunks):
-    #        start_idx = i * chunk_length
-    #        end_idx = None if i == num_chunks - 1 else (i + 1) * chunk_length
-    #        chunk = tokens[start_idx:end_idx]
-#
-    #        chunk_path = f"{save_path}_part{i + 1}.pkl.gz"
-    #        with gzip.open(chunk_path, "wb") as f:
-    #            pickle.dump(chunk, f, protocol=pickle.HIGHEST_PROTOCOL)
-#
-    #        print(f"Saved chunk {i + 1} to {chunk_path}, containing {len(chunk)} tokens.")
-#
-    #    print("All chunks saved successfully.")
-#
-    #def save_token_indices(self, save_path):
-    #    print(f"Saving data to {save_path} ...")
-    #    data = {                        
-    #        "train_indices": self.train_indices,
-    #        "val_indices": self.val_indices
-    #    }
-    #    with gzip.open(save_path, "wb") as f:
-    #        pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
-    #    print("Data saved successfully.")
-#
-    #def load_token_indices(self, load_path):
-    #    print(f"Loading data from {load_path} ...")
-    #    with gzip.open(load_path, "rb") as f:
-    #        data = pickle.load(f)
-    #    #self.tokens = data["tokens"]
-    #    self.train_indices = data["train_indices"]
-    #    self.val_indices = data["val_indices"]        
-    #    print("Data loaded successfully.")        
 
 
     def next_batch(self):
@@ -822,6 +636,8 @@ class Trainer():
         return optimizer
 
     def train(self,model,data_loader,steps=50):
+        #dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
+        dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float32' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
 
         optimizer=self.configure_optimizers(model,0.1,self.lr_scheduler.max_lr,(0.9,0.95),str(model.get_device()))
         step=0
@@ -855,9 +671,10 @@ class Trainer():
                 x,y=data_loader.next_train_batch()
                 x=x.to('cuda')
                 y=y.to('cuda')   
-            
-                #with torch.autocast(device_type=str(model.get_device()),dtype=torch.bfloat16):
-                logits,loss=model(x,y)
+                #ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
+                ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16}[dtype]
+                with torch.amp.autocast(device_type=str(model.get_device()),dtype=ptdtype):
+                    logits,loss=model(x,y)
                 loss=loss/ grad_accum_steps#normalize
                 loss_accum+=loss.detach() 
                 loss.backward()
@@ -905,17 +722,26 @@ class Trainer():
             'val_losses':val_losses
         }
         
-        plt.plot(range(1, step+steps+1), train_losses, label='Training Loss')
-        plt.plot(range(1, step+steps+1), val_losses, label='Validation Loss')
-        plt.xlabel('steps')
-        plt.ylabel('Loss')
-        plt.title('Training and Validation Loss')
-        plt.legend()
-        plt.grid()
-        plt.show()
+        #lt.plot(range(1, step+steps+1), train_losses, label='Training Loss')
+        #lt.plot(range(1, step+steps+1), val_losses, label='Validation Loss')
+        #lt.xlabel('steps')
+        #lt.ylabel('Loss')
+        #lt.title('Training and Validation Loss')
+        #lt.legend()
+        #lt.grid()
+        #lt.show()
     def save_checkpoint(self,checkpoint_path  ):
         torch.save(self.checkpoint, checkpoint_path)
 
     def load_checkpoint(self,checkpoint_path):
         self.checkpoint = torch.load(checkpoint_path)
         
+    def plot_loss(self):
+        plt.plot(range(1, self.checkpoint['step']+1), self.checkpoint['val_losses'], label='Validation Loss')
+        plt.plot(range(1, self.checkpoint['step']+1), self.checkpoint['train_losses'], label='Training Loss')        
+        plt.xlabel('steps')
+        plt.ylabel('Loss')
+        plt.title('Training and Validation Loss')
+        plt.legend()
+        plt.grid()
+        plt.show()
