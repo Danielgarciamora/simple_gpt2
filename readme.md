@@ -4,18 +4,20 @@ So this is my 1st attempt at LLMs, I followed Karpathy great tutorial here https
 Some portions of the code are copied, and others are rewritten in my style. This version is simpler (and less robust) than the version from Karpathy.
 
 Response from my model to the prompt "I'm an artificial intelligence":
-![a](image/my_response.png)
+![a](images/my_response.png)
 
 Response to Huggingface gpt 2 model:
-![nanoGPT](image/gpt2_resp.png)
+![nanoGPT](images/gpt2_resp.png)
 
 Losses
-![nanoGPT](image/loss.png)
+![nanoGPT](images/loss.png)
 
 ## Dependencies 
 
 ## Training
-
-## Generate
+Trained on ~1.6B tokens over Oxford English Dictionary,fineweb and  dailydialog.
+~2k steps of 0.5M tokens batch size.
+Training duration ~2days
 
 ## closing notes
+This is just the starting point to take us off the ground.
