@@ -16,7 +16,7 @@ max_length=50
 #prompt="Person0:what do you think about computers?\nPerson1:"
 #prompt="Person0:what's the best sport?\nPerson1:"
 #prompt="Person0:which is the bigest country?\nPerson1:"
-prompt="I'm an artificial inteligence"
+prompt="I'm an artificial intelligence"
 
 #Load from HF
 #model=HF_GPT2.from_pretrained('gpt2')
@@ -27,8 +27,8 @@ prompt="I'm an artificial inteligence"
 config=GPTConfig()
 config.n_layer=12
 model=HF_GPT2(config)           
-#model.load_safetensor("../../../checkpoints/gpt2.safetensors")
-model.load_safetensor("../../checkpoints/dg2.safetensors")
+model.load_safetensor("../../checkpoints/gpt2.safetensors")
+#model.load_safetensor("../../checkpoints/dg2.safetensors")
 
 params=model.get_num_params(False)
 print(f"num params:{params}")
